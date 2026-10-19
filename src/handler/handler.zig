@@ -353,12 +353,13 @@ pub fn Handler(comptime W: type) type {
             return h.kind == .socks5 and build_options.enable_socks5;
         }
 
-        fn openSocket(h: *Self, w: *W, family: addr.Family, out: *sys.fd_t) sys.Errno {
-            const fd = sys.socket(family, .tcp) catch |err| {
+        fn openSocket(h: *Self, w: *W, dest: addr.Address, out: *sys.fd_t) sys.Errno {
+            const fd = sys.socket(dest.family, .tcp) catch |err| {
                 log.debug("dial socket failed: {t}", .{err});
                 return .mfile;
             };
-            h.protect.apply(fd, family) catch {
+            // Loopback is the local SOCKS proxy. IP_UNICAST_IF rejects it.
+            if (!dest.isLoopback()) h.protect.apply(fd, dest.family) catch {
                 sys.close(fd);
                 return .perm;
             };
@@ -375,7 +376,7 @@ pub fn Handler(comptime W: type) type {
         fn openFresh(h: *Self, w: *W, d: *D) sys.Errno {
             const b = d.buf.?;
             const server = if (h.socksMode() and !d.bypass) h.cfg.handler.socks5.server else d.target;
-            const e = h.openSocket(w, server.addr.family, &d.fd);
+            const e = h.openSocket(w, server.addr, &d.fd);
             if (e != .success) return e;
             if (h.cfg.handler.preserve_dscp) direct.setDscp(d.fd, server.addr.family, d.tos);
             b.sa = sys.Sockaddr.fromEndpoint(server);
@@ -609,7 +610,7 @@ pub fn Handler(comptime W: type) type {
             } else return false;
             const server = h.cfg.handler.socks5.server;
             var fd: sys.fd_t = sys.invalid_fd;
-            if (h.openSocket(w, server.addr.family, &fd) != .success) {
+            if (h.openSocket(w, server.addr, &fd) != .success) {
                 h.proxyBusy(w);
                 return false;
             }
@@ -697,7 +698,7 @@ pub fn Handler(comptime W: type) type {
                 h.dropWarm(w, s, true);
                 return .disarm;
             };
-            h.protect.apply(ufd, relay.addr.family) catch {
+            if (!relay.addr.isLoopback()) h.protect.apply(ufd, relay.addr.family) catch {
                 sys.close(ufd);
                 h.dropWarm(w, s, true);
                 return .disarm;
@@ -1112,7 +1113,7 @@ pub fn Handler(comptime W: type) type {
                 W.onUdpClosed(w, s);
                 return;
             };
-            h.protect.apply(fd, relay.addr.family) catch {
+            if (!relay.addr.isLoopback()) h.protect.apply(fd, relay.addr.family) catch {
                 sys.close(fd);
                 h.dropPending(w, s);
                 W.onUdpClosed(w, s);

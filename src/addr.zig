@@ -36,6 +36,16 @@ pub const Address = struct {
         return a.family == .v6;
     }
 
+    /// 127.0.0.0/8 and ::1. IP_UNICAST_IF on these addresses fails the connect.
+    pub fn isLoopback(a: Address) bool {
+        if (a.family == .v4) return a.bytes[0] == 127;
+        var i: usize = 0;
+        while (i < 15) : (i += 1) {
+            if (a.bytes[i] != 0) return false;
+        }
+        return a.bytes[15] == 1;
+    }
+
     pub fn eql(a: Address, b: Address) bool {
         return a.family == b.family and std.mem.eql(u8, a.slice(), b.slice());
     }
